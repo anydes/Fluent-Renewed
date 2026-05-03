@@ -229,8 +229,12 @@ function Element:New(Idx, Config)
 						Picking = false
 						Keybind.Value = Key
 						KeybindDisplayLabel.Text = Library.Utilities:Prettify(Keybind.Value)
-						Library:SafeCallback(Keybind.ChangedCallback, BindInput.KeyCode)
-						Library:SafeCallback(Keybind.Changed, BindInput.KeyCode)
+						if typeof(Keybind.ChangedCallback) == "function" then
+							Library:SafeCallback(Keybind.ChangedCallback, BindInput.KeyCode)
+						end
+						if typeof(Keybind.Changed) == "function" then
+							Library:SafeCallback(Keybind.Changed, BindInput.KeyCode)
+						end
 					end
 				else
 					-- Wait for the key/button to be released before confirming for KBM
@@ -242,8 +246,14 @@ function Element:New(Idx, Config)
 								Picking = false
 								Keybind.Value = Key
 								KeybindDisplayLabel.Text = Library.Utilities:Prettify(Keybind.Value)
-								Library:SafeCallback(Keybind.ChangedCallback, EndInput.KeyCode ~= Enum.KeyCode.Unknown and EndInput.KeyCode or EndInput.UserInputType)
-								Library:SafeCallback(Keybind.Changed, EndInput.KeyCode ~= Enum.KeyCode.Unknown and EndInput.KeyCode or EndInput.UserInputType)
+								
+								local outVal = EndInput.KeyCode ~= Enum.KeyCode.Unknown and EndInput.KeyCode or EndInput.UserInputType
+								if typeof(Keybind.ChangedCallback) == "function" then
+									Library:SafeCallback(Keybind.ChangedCallback, outVal)
+								end
+								if typeof(Keybind.Changed) == "function" then
+									Library:SafeCallback(Keybind.Changed, outVal)
+								end
 							end
 						end
 					end)
