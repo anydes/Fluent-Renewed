@@ -10,63 +10,6 @@ local Element = {}
 Element.__index = Element
 Element.__type = "Keybind"
 
--- All supported Gamepad button KeyCodes for display and detection
-local GAMEPAD_KEYCODES = {
-	[Enum.KeyCode.ButtonA]          = "ButtonA",
-	[Enum.KeyCode.ButtonB]          = "ButtonB",
-	[Enum.KeyCode.ButtonX]          = "ButtonX",
-	[Enum.KeyCode.ButtonY]          = "ButtonY",
-	[Enum.KeyCode.ButtonL1]         = "ButtonL1",
-	[Enum.KeyCode.ButtonL2]         = "ButtonL2",
-	[Enum.KeyCode.ButtonL3]         = "ButtonL3",
-	[Enum.KeyCode.ButtonR1]         = "ButtonR1",
-	[Enum.KeyCode.ButtonR2]         = "ButtonR2",
-	[Enum.KeyCode.ButtonR3]         = "ButtonR3",
-	[Enum.KeyCode.ButtonStart]      = "ButtonStart",
-	[Enum.KeyCode.ButtonSelect]     = "ButtonSelect",
-	[Enum.KeyCode.DPadUp]           = "DPadUp",
-	[Enum.KeyCode.DPadDown]         = "DPadDown",
-	[Enum.KeyCode.DPadLeft]         = "DPadLeft",
-	[Enum.KeyCode.DPadRight]        = "DPadRight",
-}
-
-local GAMEPAD_INPUT_TYPES = {
-	[Enum.UserInputType.Gamepad1] = true,
-	[Enum.UserInputType.Gamepad2] = true,
-	[Enum.UserInputType.Gamepad3] = true,
-	[Enum.UserInputType.Gamepad4] = true,
-}
-
-local function isGamepadInput(Input)
-	return GAMEPAD_INPUT_TYPES[Input.UserInputType] == true
-end
-
-local function getKeyName(Input)
-	if Input.UserInputType == Enum.UserInputType.Keyboard then
-		return Input.KeyCode.Name
-	elseif Input.UserInputType == Enum.UserInputType.MouseButton1 then
-		return "LeftMousebutton"
-	elseif Input.UserInputType == Enum.UserInputType.MouseButton2 then
-		return "RightMousebutton"
-	elseif isGamepadInput(Input) then
-		return GAMEPAD_KEYCODES[Input.KeyCode]
-	end
-	return nil
-end
-
-local function keyMatchesInput(Key, Input)
-	if Key == "LeftMousebutton" then
-		return Input.UserInputType == Enum.UserInputType.MouseButton1
-	elseif Key == "RightMousebutton" then
-		return Input.UserInputType == Enum.UserInputType.MouseButton2
-	elseif isGamepadInput(Input) then
-		return GAMEPAD_KEYCODES[Input.KeyCode] == Key
-	else
-		return Input.UserInputType == Enum.UserInputType.Keyboard
-			and (Input.KeyCode.Name == Key or tostring(Input.KeyCode) == Key)
-	end
-end
-
 function Element:New(Idx, Config)
 	local Library = self.Library
 
@@ -139,25 +82,20 @@ function Element:New(Idx, Config)
 		if Keybind.Mode == "Always" then
 			return true
 		elseif Keybind.Mode == "Hold" then
-			if Keybind.Value == "None" then
+			if Keybind.Value == "None" or not Keybind.Value then
 				return false
 			end
 
 			local Key = Keybind.Value
 
-			if Key == "LeftMousebutton" then
-				return UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1)
-			elseif Key == "RightMousebutton" then
-				return UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)
+			if Key == "LeftMousebutton" or Key == "RightMousebutton" then
+				return Key == "LeftMousebutton" and UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1)
+					or Key == "RightMousebutton" and UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)
 			else
-				-- Try as KeyCode (covers both keyboard and gamepad buttons)
-				local ok, kc = pcall(function()
-					return Enum.KeyCode[Key]
+				local Success, IsDown = pcall(function()
+					return UserInputService:IsKeyDown(Enum.KeyCode[Keybind.Value])
 				end)
-				if ok and kc then
-					return UserInputService:IsKeyDown(kc)
-				end
-				return false
+				return Success and IsDown
 			end
 		else
 			return Keybind.Toggled
@@ -209,50 +147,51 @@ function Element:New(Idx, Config)
 		if
 			Input.UserInputType == Enum.UserInputType.MouseButton1
 			or Input.UserInputType == Enum.UserInputType.Touch
-			or (isGamepadInput(Input) and Input.KeyCode == Enum.KeyCode.ButtonA)
+			or (Input.UserInputType.Name:find("Gamepad") and Input.KeyCode == Enum.KeyCode.ButtonA)
 		then
 			Picking = true
 			KeybindDisplayLabel.Text = "..."
 
 			task.wait(0.2)
 
-			local connection
-			connection = UserInputService.InputBegan:Connect(function(BindInput)
-				local Key = getKeyName(BindInput)
-				if not Key then return end -- Ignore thumbsticks/invalid inputs
-
-				connection:Disconnect()
-
-				if isGamepadInput(BindInput) then
-					-- For gamepads, bind immediately on InputBegan (InputEnded can be swallowed by UI navigation)
-					if not Library.Unloaded then
-						Picking = false
-						Keybind.Value = Key
-						KeybindDisplayLabel.Text = Library.Utilities:Prettify(Keybind.Value)
-						if typeof(Keybind.ChangedCallback) == "function" then
-							Library:SafeCallback(Keybind.ChangedCallback, BindInput.KeyCode)
-						end
-						if typeof(Keybind.Changed) == "function" then
-							Library:SafeCallback(Keybind.Changed, BindInput.KeyCode)
-						end
+			local Listener
+			Listener = UserInputService.InputBegan:Connect(function(InputObj)
+				local Key
+				
+				if InputObj.UserInputType == Enum.UserInputType.Keyboard then
+					Key = InputObj.KeyCode.Name
+				elseif InputObj.UserInputType == Enum.UserInputType.MouseButton1 then
+					Key = "LeftMousebutton"
+				elseif InputObj.UserInputType == Enum.UserInputType.MouseButton2 then
+					Key = "RightMousebutton"
+				elseif InputObj.UserInputType.Name:find("Gamepad") then
+					-- Extract valid controller buttons and strictly ignore thumbstick movement
+					if InputObj.KeyCode.Name:match("Button") or InputObj.KeyCode.Name:match("DPad") then
+						Key = InputObj.KeyCode.Name
 					end
-				else
-					-- Wait for the key/button to be released before confirming for KBM
-					local endConnection
-					endConnection = UserInputService.InputEnded:Connect(function(EndInput)
-						if getKeyName(EndInput) == Key then
-							endConnection:Disconnect()
+				end
+
+				if Key then
+					Listener:Disconnect()
+					
+					-- Immediately update the UI to show the selected key
+					Keybind.Value = Key
+					KeybindDisplayLabel.Text = Library.Utilities:Prettify(Keybind.Value)
+
+					-- Wait for the user to physically release the button before closing the picker,
+					-- so that they don't immediately trigger their own keybind.
+					local endListener
+					endListener = UserInputService.InputEnded:Connect(function(EndInput)
+						if EndInput.KeyCode == InputObj.KeyCode and EndInput.UserInputType == InputObj.UserInputType then
+							endListener:Disconnect()
+							Picking = false
+							
 							if not Library.Unloaded then
-								Picking = false
-								Keybind.Value = Key
-								KeybindDisplayLabel.Text = Library.Utilities:Prettify(Keybind.Value)
-								
-								local outVal = EndInput.KeyCode ~= Enum.KeyCode.Unknown and EndInput.KeyCode or EndInput.UserInputType
 								if typeof(Keybind.ChangedCallback) == "function" then
-									Library:SafeCallback(Keybind.ChangedCallback, outVal)
+									Library:SafeCallback(Keybind.ChangedCallback, InputObj.KeyCode)
 								end
 								if typeof(Keybind.Changed) == "function" then
-									Library:SafeCallback(Keybind.Changed, outVal)
+									Library:SafeCallback(Keybind.Changed, InputObj.KeyCode)
 								end
 							end
 						end
@@ -262,34 +201,71 @@ function Element:New(Idx, Config)
 		end
 	end)
 
-	-- Global input listener: fires Toggle/Hold/Always logic for any bound key
+	-- Global input listener
 	Creator.AddSignal(UserInputService.InputBegan, function(Input)
-		if Picking or UserInputService:GetFocusedTextBox() then return end
-
-		local Key = Keybind.Value
-		if not Key or Key == "None" then return end
-
-		if keyMatchesInput(Key, Input) then
+		if not Picking and not UserInputService:GetFocusedTextBox() then
 			if Keybind.Mode == "Toggle" then
-				Keybind.Toggled = not Keybind.Toggled
-				Keybind:DoClick()
+				local Key = Keybind.Value
+				if not Key or Key == "None" then return end
+
+				if Key == "LeftMousebutton" or Key == "RightMousebutton" then
+					if
+						Key == "LeftMousebutton" and Input.UserInputType == Enum.UserInputType.MouseButton1
+						or Key == "RightMousebutton" and Input.UserInputType == Enum.UserInputType.MouseButton2
+					then
+						Keybind.Toggled = not Keybind.Toggled
+						Keybind:DoClick()
+					end
+				elseif Input.UserInputType == Enum.UserInputType.Keyboard or Input.UserInputType.Name:find("Gamepad") then
+					if Input.KeyCode.Name == Key then
+						Keybind.Toggled = not Keybind.Toggled
+						Keybind:DoClick()
+					end
+				end
 			elseif Keybind.Mode == "Hold" then
-				Keybind.Toggled = true
-				Keybind:DoClick()
+				local Key = Keybind.Value
+				if not Key or Key == "None" then return end
+
+				if Key == "LeftMousebutton" or Key == "RightMousebutton" then
+					if
+						Key == "LeftMousebutton" and Input.UserInputType == Enum.UserInputType.MouseButton1
+						or Key == "RightMousebutton" and Input.UserInputType == Enum.UserInputType.MouseButton2
+					then
+						Keybind.Toggled = true
+						Keybind:DoClick()
+					end
+				elseif Input.UserInputType == Enum.UserInputType.Keyboard or Input.UserInputType.Name:find("Gamepad") then
+					if Input.KeyCode.Name == Key then
+						Keybind.Toggled = true
+						Keybind:DoClick()
+					end
+				end
 			end
 		end
 	end)
 
-	-- Release for Hold mode
+	-- Release for Hold Mode
 	Creator.AddSignal(UserInputService.InputEnded, function(Input)
-		if Picking then return end
+		if not Picking and not UserInputService:GetFocusedTextBox() then
+			if Keybind.Mode == "Hold" then
+				local Key = Keybind.Value
+				if not Key or Key == "None" then return end
 
-		local Key = Keybind.Value
-		if not Key or Key == "None" then return end
-
-		if Keybind.Mode == "Hold" and keyMatchesInput(Key, Input) then
-			Keybind.Toggled = false
-			Keybind:DoClick()
+				if Key == "LeftMousebutton" or Key == "RightMousebutton" then
+					if
+						Key == "LeftMousebutton" and Input.UserInputType == Enum.UserInputType.MouseButton1
+						or Key == "RightMousebutton" and Input.UserInputType == Enum.UserInputType.MouseButton2
+					then
+						Keybind.Toggled = false
+						Keybind:DoClick()
+					end
+				elseif Input.UserInputType == Enum.UserInputType.Keyboard or Input.UserInputType.Name:find("Gamepad") then
+					if Input.KeyCode.Name == Key then
+						Keybind.Toggled = false
+						Keybind:DoClick()
+					end
+				end
+			end
 		end
 	end)
 
@@ -300,7 +276,7 @@ function Element:New(Idx, Config)
 	Keybind.Instance = KeybindFrame
 
 	return setmetatable(Keybind, {
-		__newindex = function(self, index, newvalue)
+		__newindex =  function(self, index, newvalue)
 			if index == "Value" then
 				task.spawn(Keybind.SetValue, Keybind, newvalue)
 			end
