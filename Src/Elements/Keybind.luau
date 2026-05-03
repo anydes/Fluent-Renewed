@@ -49,7 +49,7 @@ local function getKeyName(Input)
 	elseif Input.UserInputType == Enum.UserInputType.MouseButton2 then
 		return "RightMousebutton"
 	elseif isGamepadInput(Input) then
-		return GAMEPAD_KEYCODES[Input.KeyCode] or Input.KeyCode.Name
+		return GAMEPAD_KEYCODES[Input.KeyCode]
 	end
 	return nil
 end
@@ -60,8 +60,7 @@ local function keyMatchesInput(Key, Input)
 	elseif Key == "RightMousebutton" then
 		return Input.UserInputType == Enum.UserInputType.MouseButton2
 	elseif isGamepadInput(Input) then
-		local gpName = GAMEPAD_KEYCODES[Input.KeyCode] or Input.KeyCode.Name
-		return gpName == Key
+		return GAMEPAD_KEYCODES[Input.KeyCode] == Key
 	else
 		return Input.UserInputType == Enum.UserInputType.Keyboard
 			and (Input.KeyCode.Name == Key or tostring(Input.KeyCode) == Key)
@@ -210,44 +209,44 @@ function Element:New(Idx, Config)
 		if
 			Input.UserInputType == Enum.UserInputType.MouseButton1
 			or Input.UserInputType == Enum.UserInputType.Touch
+			or (isGamepadInput(Input) and Input.KeyCode == Enum.KeyCode.ButtonA)
 		then
 			Picking = true
 			KeybindDisplayLabel.Text = "..."
 
 			task.wait(0.2)
 
-			-- Listen for the NEXT input of any supported type
-			local inputConnection
-			inputConnection = UserInputService.InputBegan:Connect(function(Input)
-				if Picking then
-					local Key = getKeyName(Input)
-					if Key then
-						-- Immediately set the keybind without waiting for InputEnded
+			local connection
+			connection = UserInputService.InputBegan:Connect(function(BindInput)
+				local Key = getKeyName(BindInput)
+				if not Key then return end -- Ignore thumbsticks/invalid inputs
+
+				connection:Disconnect()
+
+				if isGamepadInput(BindInput) then
+					-- For gamepads, bind immediately on InputBegan (InputEnded can be swallowed by UI navigation)
+					if not Library.Unloaded then
 						Picking = false
 						Keybind.Value = Key
 						KeybindDisplayLabel.Text = Library.Utilities:Prettify(Keybind.Value)
-						
-						-- Fire the callbacks with the appropriate value
-						local callbackValue = Input.KeyCode ~= Enum.KeyCode.Unknown and Input.KeyCode or Input.UserInputType
-						Library:SafeCallback(Keybind.ChangedCallback, callbackValue)
-						Library:SafeCallback(Keybind.Changed, callbackValue)
-						
-						-- Disconnect the listener
-						if inputConnection then
-							inputConnection:Disconnect()
+						Library:SafeCallback(Keybind.ChangedCallback, BindInput.KeyCode)
+						Library:SafeCallback(Keybind.Changed, BindInput.KeyCode)
+					end
+				else
+					-- Wait for the key/button to be released before confirming for KBM
+					local endConnection
+					endConnection = UserInputService.InputEnded:Connect(function(EndInput)
+						if getKeyName(EndInput) == Key then
+							endConnection:Disconnect()
+							if not Library.Unloaded then
+								Picking = false
+								Keybind.Value = Key
+								KeybindDisplayLabel.Text = Library.Utilities:Prettify(Keybind.Value)
+								Library:SafeCallback(Keybind.ChangedCallback, EndInput.KeyCode ~= Enum.KeyCode.Unknown and EndInput.KeyCode or EndInput.UserInputType)
+								Library:SafeCallback(Keybind.Changed, EndInput.KeyCode ~= Enum.KeyCode.Unknown and EndInput.KeyCode or EndInput.UserInputType)
+							end
 						end
-					end
-				end
-			end)
-			
-			-- Add a timeout to stop listening after 5 seconds
-			task.delay(5, function()
-				if Picking then
-					Picking = false
-					KeybindDisplayLabel.Text = Library.Utilities:Prettify(Keybind.Value)
-					if inputConnection then
-						inputConnection:Disconnect()
-					end
+					end)
 				end
 			end)
 		end
