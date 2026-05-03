@@ -217,25 +217,38 @@ function Element:New(Idx, Config)
 			task.wait(0.2)
 
 			-- Listen for the NEXT input of any supported type
-			UserInputService.InputBegan:Once(function(Input)
-				local Key = getKeyName(Input)
-				if not Key then
-					Picking = false
-					KeybindDisplayLabel.Text = Library.Utilities:Prettify(Keybind.Value)
-					return
-				end
-
-				-- Wait for the key/button to be released before confirming
-				UserInputService.InputEnded:Once(function(EndInput)
-					local endKey = getKeyName(EndInput)
-					if endKey == Key and not Library.Unloaded then
+			local inputConnection
+			inputConnection = UserInputService.InputBegan:Connect(function(Input)
+				if Picking then
+					local Key = getKeyName(Input)
+					if Key then
+						-- Immediately set the keybind without waiting for InputEnded
 						Picking = false
 						Keybind.Value = Key
 						KeybindDisplayLabel.Text = Library.Utilities:Prettify(Keybind.Value)
-						Library:SafeCallback(Keybind.ChangedCallback, EndInput.KeyCode ~= Enum.KeyCode.Unknown and EndInput.KeyCode or EndInput.UserInputType)
-						Library:SafeCallback(Keybind.Changed, EndInput.KeyCode ~= Enum.KeyCode.Unknown and EndInput.KeyCode or EndInput.UserInputType)
+						
+						-- Fire the callbacks with the appropriate value
+						local callbackValue = Input.KeyCode ~= Enum.KeyCode.Unknown and Input.KeyCode or Input.UserInputType
+						Library:SafeCallback(Keybind.ChangedCallback, callbackValue)
+						Library:SafeCallback(Keybind.Changed, callbackValue)
+						
+						-- Disconnect the listener
+						if inputConnection then
+							inputConnection:Disconnect()
+						end
 					end
-				end)
+				end
+			end)
+			
+			-- Add a timeout to stop listening after 5 seconds
+			task.delay(5, function()
+				if Picking then
+					Picking = false
+					KeybindDisplayLabel.Text = Library.Utilities:Prettify(Keybind.Value)
+					if inputConnection then
+						inputConnection:Disconnect()
+					end
+				end
 			end)
 		end
 	end)
